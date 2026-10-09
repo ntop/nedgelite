@@ -240,12 +240,12 @@ Example (``/etc/nedgelite/labels.conf``):
    1   protocol  TLS
    2   protocol  QUIC
    3   protocol  BitTorrent
-   4   protocol  Facebook   SOCIAL
-   4   protocol  Instagram
-   4   protocol  TikTok
+   4   protocol  Facebook   FB
+   5   protocol  Instagram
+   6   protocol  TikTok
 
    # Categories
-   10  category  SocialNetwork
+   10  category  SocialNetwork SOCIAL
    11  category  Streaming
 
    # Flow risks
@@ -271,8 +271,8 @@ Enabling Labels
       1	NDPI-TLS
       2	NDPI-QUIC
       3	NDPI-BITTORRENT
-      4	SOCIAL
-      10	NDPI-CAT-SOCIALNETWORK
+      4	FB
+      10	SOCIAL
       11	NDPI-CAT-STREAMING
       20	NDPI-RISK-TLS_SELFSIGNED_CERT
       21	NDPI-RISK-NON_STANDARD_PORT
