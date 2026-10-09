@@ -165,6 +165,42 @@ Use this option if these settings are already configured or managed externally.
 
    sudo nedgelite -q 0 -s
 
+Connection Label Options
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+nEdge Lite can tag connections with conntrack labels (connlabels) describing what nDPI
+detected, so that iptables rules can match on them. See :ref:`connection-labels` for
+details and examples.
+
+**-L, --labels <path>**
+
+Enable connection labels, using the specified label map file. The map selects which nDPI
+protocols, categories and flow risks set which of the 128 available label bits.
+
+.. code-block:: console
+
+   sudo nedgelite -q 0 -L /etc/nedgelite/labels.conf
+
+**-o, --connlabel <dir>**
+
+Generate ``<dir>/connlabel.conf`` from the label map, then exit. The file assigns a name
+to each label bit used by the map and must be installed as ``/etc/xtables/connlabel.conf``
+so that iptables and conntrack can refer to labels by name. Requires ``-L``.
+
+.. code-block:: console
+
+   nedgelite -L /etc/nedgelite/labels.conf -o /tmp
+   sudo cp /tmp/connlabel.conf /etc/xtables/connlabel.conf
+
+**-O, --protocols <dir>**
+
+Generate ``<dir>/protocols.conf`` with one ``NDPI-<NAME>,<protocol>,<category>`` line per
+nDPI protocol, then exit. It can be combined with ``-o``.
+
+.. code-block:: console
+
+   nedgelite -O /tmp
+
 License Options
 ~~~~~~~~~~~~~~~
 
@@ -215,6 +251,17 @@ Policy File
 **Example**: ``/etc/nedgelite/policy.json``
 
 See :doc:`policies` for detailed policy file format.
+
+Label Map File
+~~~~~~~~~~~~~~
+
+**Location**: Specified with ``-L`` option
+
+**Format**: Text, one ``<bit> <type> <name> [<label>]`` mapping per line
+
+**Example**: ``/etc/nedgelite/labels.conf``
+
+See :ref:`connection-labels` for the file format.
 
 Runtime Configuration
 ---------------------
@@ -320,6 +367,18 @@ Bridge Mode with Policy File
 
    # Start nEdge Lite
    sudo nedgelite -q 0 -r /etc/nedgelite/policy.json -z tcp://127.0.0.1:1234
+
+Connection Labels
+~~~~~~~~~~~~~~~~~
+
+.. code-block:: console
+
+   # Generate and install connlabel.conf (once, and after changing the map)
+   nedgelite -L /etc/nedgelite/labels.conf -o /tmp
+   sudo cp /tmp/connlabel.conf /etc/xtables/connlabel.conf
+
+   # Start nEdge Lite with labels enabled
+   sudo nedgelite -q 0 -r /etc/nedgelite/policy.json -L /etc/nedgelite/labels.conf
 
 Multiple ntopng Collectors
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~

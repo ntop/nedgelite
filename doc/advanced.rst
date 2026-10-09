@@ -186,6 +186,140 @@ nEdge Lite's CONNMARK values can be used by tc to apply QoS policies:
    sudo tc filter add dev eth0 parent 1: protocol ip prio 2 \
      handle 2 fw classid 1:20  # Low priority (mark=2)
 
+.. _connection-labels:
+
+Connection Labels
+-----------------
+
+In addition to the pass/drop mark, nEdge Lite can tag each connection with conntrack
+labels (connlabels) describing what nDPI detected: protocols, categories and flow risks.
+Labels are stored in the conntrack entry, so any iptables rule can match on them with the
+``connlabel`` match, for example to drop, log or mark traffic of a given application
+independently of the nEdge Lite policies.
+
+The kernel provides 128 label bits per connection, while nDPI detects several hundred
+protocols. A label map file selects the protocols, categories and risks of interest and
+assigns each of them a label bit.
+
+Label Map File
+~~~~~~~~~~~~~~
+
+The label map is a text file with one mapping per line; ``#`` starts a comment:
+
+.. code-block:: text
+
+   <bit> protocol <name|id>                     [<label>]
+   <bit> category <name|id>                     [<label>]
+   <bit> risk     <NDPI_xxx code|short name|id> [<label>]
+   <bit> over                                   [<label>]
+
+- ``<bit>``: label bit, 0-127.
+- ``protocol``: nDPI protocol name or id (see ``nedgelite -H``). Both the master and the
+  application protocol are matched, so ``TLS`` matches TLS.Google too. ``Unknown``
+  matches flows nDPI could not detect.
+- ``category``: nDPI category name or id (e.g. ``SocialNetwork``, ``Streaming``).
+- ``risk``: nDPI flow risk, as ``NDPI_xxx`` code (e.g. ``NDPI_TLS_SELFSIGNED_CERTIFICATE``),
+  short name (e.g. ``non_standard_port``) or id.
+- ``over``: set on every flow once detection is completed.
+- ``<label>``: optional name of the bit in ``connlabel.conf``. By default it is generated
+  from the first mapping of the bit: ``NDPI-<PROTOCOL>``, ``NDPI-CAT-<CATEGORY>``,
+  ``NDPI-RISK-<RISK>`` or ``NDPI-OVER``.
+
+Names are case-insensitive. Several mappings can share the same bit: the bit is set when
+any of them matches. Flows matching no mapping are not labelled (unless ``over`` is used).
+Any error in the file (unknown name, bit out of range, malformed line) is reported with
+its line number and nEdge Lite does not start.
+
+Example (``/etc/nedgelite/labels.conf``):
+
+.. code-block:: text
+
+   0   over
+
+   # Protocols
+   1   protocol  TLS
+   2   protocol  QUIC
+   3   protocol  BitTorrent
+   4   protocol  Facebook   SOCIAL
+   4   protocol  Instagram
+   4   protocol  TikTok
+
+   # Categories
+   10  category  SocialNetwork
+   11  category  Streaming
+
+   # Flow risks
+   20  risk      NDPI_TLS_SELFSIGNED_CERTIFICATE
+   21  risk      non_standard_port
+
+Enabling Labels
+~~~~~~~~~~~~~~~
+
+1. Generate ``connlabel.conf`` from the map and install it, so that iptables and conntrack
+   can refer to labels by name. Repeat this step whenever the map changes.
+
+   .. code-block:: console
+
+      nedgelite -L /etc/nedgelite/labels.conf -o /tmp
+      sudo cp /tmp/connlabel.conf /etc/xtables/connlabel.conf
+
+   With the example map above the generated file is:
+
+   .. code-block:: text
+
+      0	NDPI-OVER
+      1	NDPI-TLS
+      2	NDPI-QUIC
+      3	NDPI-BITTORRENT
+      4	SOCIAL
+      10	NDPI-CAT-SOCIALNETWORK
+      11	NDPI-CAT-STREAMING
+      20	NDPI-RISK-TLS_SELFSIGNED_CERT
+      21	NDPI-RISK-NON_STANDARD_PORT
+
+2. Add the iptables rules that use the labels. The kernel only reserves label space for
+   connections created while at least one ``connlabel`` rule is loaded, so load the
+   rules before starting nEdge Lite:
+
+   .. code-block:: console
+
+      # Drop BitTorrent and social network traffic
+      sudo iptables -A FORWARD -m connlabel --label NDPI-BITTORRENT -j DROP
+      sudo iptables -A FORWARD -m connlabel --label SOCIAL -j DROP
+
+      # Log connections with a self-signed TLS certificate
+      sudo iptables -A FORWARD -m connlabel --label NDPI-RISK-TLS_SELFSIGNED_CERT \
+        -j LOG --log-prefix "self-signed: "
+
+3. Start nEdge Lite with ``-L`` (or ``--labels=/etc/nedgelite/labels.conf`` in the
+   configuration file):
+
+   .. code-block:: console
+
+      sudo nedgelite -q 0 -r /etc/nedgelite/policy.json -L /etc/nedgelite/labels.conf
+
+4. Check the labels assigned to connections:
+
+   .. code-block:: console
+
+      sudo conntrack -L -o labels
+
+Notes
+~~~~~
+
+- Labels are set once per connection, when nDPI detection completes, together with the
+  pass/drop mark. The packets exchanged before that point are not affected by label rules.
+- Labels are independent of the nEdge Lite policies: a connection dropped by a policy is
+  labelled as well, and label rules apply on top of the policy verdict.
+- To enforce traffic with label rules only, simply do not configure drop policies: without
+  ``-r`` and ``-p`` nEdge Lite uses a built-in pass-all policy. Connections are still
+  marked as passed once detection completes, which is required to stop sending them to
+  nEdge Lite, so keep the mark rules installed by the setup scripts.
+- Only TCP and UDP connections are labelled; broadcast and multicast traffic is skipped.
+- ``nedgelite -O <dir>`` generates ``protocols.conf``, with one
+  ``NDPI-<NAME>,<protocol>,<category>`` line per nDPI protocol, which can be used to look up
+  the protocol and category of the generated protocol label names.
+
 Bridge Mode Advanced Configuration
 -----------------------------------
 
