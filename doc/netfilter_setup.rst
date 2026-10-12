@@ -291,6 +291,9 @@ View Connection Tracking
    # View connections with marks
    sudo conntrack -L -m
 
+   # View connections with labels (when -L is used)
+   sudo conntrack -L -o labels
+
    # View statistics
    sudo conntrack -S
 

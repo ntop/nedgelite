@@ -217,13 +217,15 @@ The label map is a text file with one mapping per line; ``#`` starts a comment:
 - ``protocol``: nDPI protocol name or id (see ``nedgelite -H``). Both the master and the
   application protocol are matched, so ``TLS`` matches TLS.Google too. ``Unknown``
   matches flows nDPI could not detect.
-- ``category``: nDPI category name or id (e.g. ``SocialNetwork``, ``Streaming``).
+- ``category``: nDPI category name or id (e.g. ``SocialNetwork``, ``Streaming``; see
+  ``nedgelite -H``). Names containing spaces (``User custom category N``) must be given by id.
 - ``risk``: nDPI flow risk, as ``NDPI_xxx`` code (e.g. ``NDPI_TLS_SELFSIGNED_CERTIFICATE``),
-  short name (e.g. ``non_standard_port``) or id.
+  short name (e.g. ``non_standard_port``) or id (see ``nedgelite -H``).
 - ``over``: set on every flow once detection is completed.
 - ``<label>``: optional name of the bit in ``connlabel.conf``. By default it is generated
   from the first mapping of the bit: ``NDPI-<PROTOCOL>``, ``NDPI-CAT-<CATEGORY>``,
-  ``NDPI-RISK-<RISK>`` or ``NDPI-OVER``.
+  ``NDPI-RISK-<RISK>`` or ``NDPI-OVER`` (uppercase, other characters replaced by ``-``).
+  Labels may only contain letters, digits and ``-`` (a ``connlabel.conf`` restriction).
 
 Names are case-insensitive. Several mappings can share the same bit: the bit is set when
 any of them matches. Flows matching no mapping are not labelled (unless ``over`` is used).
@@ -255,12 +257,15 @@ Example (``/etc/nedgelite/labels.conf``):
 Enabling Labels
 ~~~~~~~~~~~~~~~
 
-1. Generate ``connlabel.conf`` from the map and install it, so that iptables and conntrack
-   can refer to labels by name. Repeat this step whenever the map changes.
+1. Generate ``connlabel.conf`` from the map and install it as
+   ``/etc/xtables/connlabel.conf``, so that iptables and conntrack can refer to labels by
+   name (the ``/etc/xtables`` directory usually does not exist and must be created).
+   Repeat this step whenever the map changes.
 
    .. code-block:: console
 
       nedgelite -L /etc/nedgelite/labels.conf -o /tmp
+      sudo mkdir -p /etc/xtables
       sudo cp /tmp/connlabel.conf /etc/xtables/connlabel.conf
 
    With the example map above the generated file is:
@@ -272,14 +277,33 @@ Enabling Labels
       2	NDPI-QUIC
       3	NDPI-BITTORRENT
       4	FB
+      5	NDPI-INSTAGRAM
+      6	NDPI-TIKTOK
       10	SOCIAL
       11	NDPI-CAT-STREAMING
-      20	NDPI-RISK-TLS_SELFSIGNED_CERT
-      21	NDPI-RISK-NON_STANDARD_PORT
+      20	NDPI-RISK-TLS-SELFSIGNED-CERT
+      21	NDPI-RISK-NON-STANDARD-PORT
 
-2. Add the iptables rules that use the labels. The kernel only reserves label space for
-   connections created while at least one ``connlabel`` rule is loaded, so load the
-   rules before starting nEdge Lite:
+   .. note::
+
+      nftables reads labels from ``/etc/connlabel.conf`` instead. When using ``ct label``
+      in nft rules, install the same file there too (e.g. as a symlink to
+      ``/etc/xtables/connlabel.conf``).
+
+2. Load at least one ``connlabel`` rule. The kernel reserves label space only for
+   connections created while a ``connlabel`` rule is loaded: without one, labels set by
+   nEdge Lite are silently discarded. The rules must be added **after** the netfilter setup
+   scripts (``bridge_setup.sh`` and ``default_setup.sh`` flush the iptables tables).
+
+   Any rule using the ``connlabel`` match is enough, including a match-only rule without a
+   target (the packet continues unchanged):
+
+   .. code-block:: console
+
+      sudo modprobe xt_connlabel
+      sudo iptables -t mangle -I PREROUTING -m connlabel --label NDPI-OVER
+
+   Rules that act on labels can be added as needed, for example:
 
    .. code-block:: console
 
@@ -288,8 +312,16 @@ Enabling Labels
       sudo iptables -A FORWARD -m connlabel --label SOCIAL -j DROP
 
       # Log connections with a self-signed TLS certificate
-      sudo iptables -A FORWARD -m connlabel --label NDPI-RISK-TLS_SELFSIGNED_CERT \
+      sudo iptables -A FORWARD -m connlabel --label NDPI-RISK-TLS-SELFSIGNED-CERT \
         -j LOG --log-prefix "self-signed: "
+
+   Connections that already existed when the first ``connlabel`` rule was loaded cannot be
+   labelled. Flush the conntrack table to have them recreated (this also resets their
+   pass/drop mark, so they are inspected again):
+
+   .. code-block:: console
+
+      sudo conntrack -F
 
 3. Start nEdge Lite with ``-L`` (or ``--labels=/etc/nedgelite/labels.conf`` in the
    configuration file):
@@ -298,11 +330,40 @@ Enabling Labels
 
       sudo nedgelite -q 0 -r /etc/nedgelite/policy.json -L /etc/nedgelite/labels.conf
 
+   When nEdge Lite runs as a systemd service, the setup script is executed at every
+   service start and flushes the label rules. Add them back from a drop-in, whose
+   ``ExecStartPre`` commands run after the ones of the service (i.e. after the setup
+   script) and before nEdge Lite starts:
+
+   .. code-block:: console
+
+      sudo systemctl edit nedgelite
+
+   .. code-block:: ini
+
+      [Service]
+      ExecStartPre=/usr/sbin/iptables -t mangle -I PREROUTING -m connlabel --label NDPI-OVER
+      ExecStartPre=/usr/sbin/iptables -A FORWARD -m connlabel --label SOCIAL -j DROP
+
 4. Check the labels assigned to connections:
 
    .. code-block:: console
 
       sudo conntrack -L -o labels
+
+   Labels are reported by name at the end of each entry, after the mark:
+
+   .. code-block:: text
+
+      tcp      6 431996 ESTABLISHED src=192.168.1.20 dst=157.240.231.35 sport=52814 dport=443 packets=42 bytes=6120 src=157.240.231.35 dst=192.168.1.20 sport=443 dport=52814 packets=55 bytes=48211 [ASSURED] mark=1 use=1 labels=NDPI-OVER,NDPI-TLS,FB,SOCIAL
+      tcp      6 431990 ESTABLISHED src=192.168.1.31 dst=203.0.113.7 sport=40122 dport=8443 packets=12 bytes=1830 src=203.0.113.7 dst=192.168.1.31 sport=8443 dport=40122 packets=10 bytes=4420 [ASSURED] mark=1 use=1 labels=NDPI-OVER,NDPI-TLS,NDPI-RISK-TLS-SELFSIGNED-CERT,NDPI-RISK-NON-STANDARD-PORT
+
+   Only bits named in ``/etc/xtables/connlabel.conf`` are shown. Connections with a given
+   label can be listed with ``-l``:
+
+   .. code-block:: console
+
+      sudo conntrack -L -o labels -l SOCIAL
 
 Notes
 ~~~~~
@@ -316,9 +377,10 @@ Notes
   marked as passed once detection completes, which is required to stop sending them to
   nEdge Lite, so keep the mark rules installed by the setup scripts.
 - Only TCP and UDP connections are labelled; broadcast and multicast traffic is skipped.
-- ``nedgelite -O <dir>`` generates ``protocols.conf``, with one
-  ``NDPI-<NAME>,<protocol>,<category>`` line per nDPI protocol, which can be used to look up
-  the protocol and category of the generated protocol label names.
+- Labels are written to the conntrack entry via netlink, which requires the entry to be
+  already confirmed by the kernel. Flows detected on their very first packet (e.g. short
+  UDP exchanges such as DNS) may therefore remain unlabelled; with ``-v`` nEdge Lite logs
+  ``Unable to set flow label`` for them.
 
 Bridge Mode Advanced Configuration
 -----------------------------------

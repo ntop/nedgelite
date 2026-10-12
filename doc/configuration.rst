@@ -57,7 +57,9 @@ Display version information.
 
 **-H**
 
-Display list of supported nDPI protocols.
+Display the verbose help, followed by the lists of supported nDPI protocols, categories
+and flow risks (with their ids, codes and short names), as accepted by the label map
+(see :ref:`connection-labels`).
 
 .. code-block:: console
 
@@ -185,21 +187,14 @@ protocols, categories and flow risks set which of the 128 available label bits.
 
 Generate ``<dir>/connlabel.conf`` from the label map, then exit. The file assigns a name
 to each label bit used by the map and must be installed as ``/etc/xtables/connlabel.conf``
-so that iptables and conntrack can refer to labels by name. Requires ``-L``.
+so that iptables and conntrack can refer to labels by name. Requires ``-L``. Label names
+contain only letters, digits and ``-``.
 
 .. code-block:: console
 
    nedgelite -L /etc/nedgelite/labels.conf -o /tmp
+   sudo mkdir -p /etc/xtables
    sudo cp /tmp/connlabel.conf /etc/xtables/connlabel.conf
-
-**-O, --protocols <dir>**
-
-Generate ``<dir>/protocols.conf`` with one ``NDPI-<NAME>,<protocol>,<category>`` line per
-nDPI protocol, then exit. It can be combined with ``-o``.
-
-.. code-block:: console
-
-   nedgelite -O /tmp
 
 License Options
 ~~~~~~~~~~~~~~~
