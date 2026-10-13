@@ -328,7 +328,7 @@ Enabling Labels
 
    .. code-block:: console
 
-      sudo nedgelite -q 0 -r /etc/nedgelite/policy.json -L /etc/nedgelite/labels.conf
+      sudo nedgelite -q 0 -L /etc/nedgelite/labels.conf
 
    When nEdge Lite runs as a systemd service, the setup script is executed at every
    service start and flushes the label rules. Add them back from a drop-in, whose
